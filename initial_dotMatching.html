@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pixel Matrix Mapper</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #1a1a1a; color: #e0e0e0; font-family: system-ui, sans-serif; padding: 2rem; min-height: 100vh; }
+    h1 { font-size: 18px; font-weight: 500; margin-bottom: 0.4rem; color: #fff; }
+    p.sub { font-size: 13px; color: #777; margin-bottom: 1.5rem; }
+    #dropzone {
+      border: 1.5px dashed #555; border-radius: 12px; padding: 2.5rem;
+      text-align: center; cursor: pointer; color: #888; font-size: 14px;
+      margin-bottom: 1.5rem; transition: background 0.15s, border-color 0.15s;
+    }
+    #dropzone.drag { background: #1e2a3a; border-color: #4a8fd4; }
+    #dropzone svg { display: block; margin: 0 auto 10px; opacity: 0.5; }
+    .panel { background: #252525; border-radius: 10px; border: 0.5px solid #333; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+    .panel-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #666; margin-bottom: 0.75rem; }
+    .controls { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+    .ctrl { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #aaa; }
+    .ctrl label { white-space: nowrap; }
+    .ctrl span { min-width: 34px; font-size: 13px; font-weight: 500; color: #fff; }
+    input[type=range] { width: 100px; accent-color: #4a8fd4; }
+    select { font-size: 13px; padding: 5px 8px; border-radius: 6px; border: 0.5px solid #444; background: #333; color: #e0e0e0; cursor: pointer; }
+    input[type=color] { height: 28px; width: 44px; border: none; cursor: pointer; border-radius: 4px; padding: 0; background: none; }
+    button { font-size: 13px; padding: 6px 14px; border-radius: 6px; border: 0.5px solid #444; background: #333; color: #e0e0e0; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+    button:hover { background: #3a3a3a; }
+    .hint { font-size: 12px; color: #555; margin-top: 0.5rem; }
+    .canvasBox { border-radius: 12px; overflow: hidden; border: 0.5px solid #333; position: relative; margin-bottom: 1rem; }
+    canvas { display: block; width: 100%; }
+    #overlayCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <h1>Pixel Matrix Mapper</h1>
+  <p class="sub">Align the grid to your circles, sample brightness at each center, render as square pixels.</p>
+
+  <div id="dropzone">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    Drop image here or <u style="cursor:pointer" onclick="document.getElementById('fileInput').click()">browse</u>
+    <input type="file" id="fileInput" accept="image/*" style="display:none">
+  </div>
+
+  <div id="mainUI" style="display:none">
+
+    <div class="panel">
+      <div class="panel-title">Step 1 — align grid to circles</div>
+      <div class="controls">
+        <div class="ctrl">
+          <label>Spacing X</label>
+          <input type="range" id="spacingX" min="4" max="60" value="20" step="0.5">
+          <span id="spacingXVal">20</span>
+        </div>
+        <div class="ctrl">
+          <label>Spacing Y</label>
+          <input type="range" id="spacingY" min="4" max="60" value="20" step="0.5">
+          <span id="spacingYVal">20</span>
+        </div>
+        <div class="ctrl">
+          <label>Offset X</label>
+          <input type="range" id="offsetX" min="0" max="60" value="0" step="0.5">
+          <span id="offsetXVal">0</span>
+        </div>
+        <div class="ctrl">
+          <label>Offset Y</label>
+          <input type="range" id="offsetY" min="0" max="60" value="0" step="0.5">
+          <span id="offsetYVal">0</span>
+        </div>
+        <div class="ctrl">
+          <label>Sample radius</label>
+          <input type="range" id="sampleR" min="1" max="20" value="4" step="1">
+          <span id="sampleRVal">4</span>
+        </div>
+      </div>
+      <div class="controls" style="margin-top:0.75rem">
+        <div class="ctrl">
+          <label><input type="checkbox" id="showOverlay" checked style="margin-right:4px"> Show alignment overlay</label>
+        </div>
+      </div>
+      <p class="hint">Blue squares show where each pixel will be sampled. Tune spacing and offset until they land on circles, not seams.</p>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Step 2 — render</div>
+      <div class="controls">
+        <div class="ctrl">
+          <label>Pixel size</label>
+          <input type="range" id="drawSize" min="1" max="40" value="10" step="0.5">
+          <span id="drawSizeVal">10</span>
+        </div>
+        <div class="ctrl">
+          <label>Gap</label>
+          <input type="range" id="gap" min="0" max="16" value="2" step="1">
+          <span id="gapVal">2</span>
+        </div>
+        <div class="ctrl">
+          <label>Tone</label>
+          <select id="modeSelect">
+            <option value="gray">Grayscale</option>
+            <option value="invert">Inverted</option>
+            <option value="dark">Dark boost</option>
+            <option value="light">Light boost</option>
+          </select>
+        </div>
+        <div class="ctrl">
+          <label>Background</label>
+          <input type="color" id="bgColor" value="#111111">
+        </div>
+        <button id="renderBtn">Render</button>
+        <button id="exportBtn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Export PNG
+        </button>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+      <div style="flex:1; min-width:280px;">
+        <div style="font-size:12px; color:#555; margin-bottom:0.5rem;">Source + alignment</div>
+        <div class="canvasBox">
+          <canvas id="srcCanvas"></canvas>
+          <canvas id="overlayCanvas"></canvas>
+        </div>
+      </div>
+      <div style="flex:1; min-width:280px;" id="outputCol" style="display:none">
+        <div style="font-size:12px; color:#555; margin-bottom:0.5rem;">Rendered output</div>
+        <div class="canvasBox">
+          <canvas id="outCanvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let srcImg = null;
+    let displayScale = 1;
+    const offCanvas = document.createElement('canvas');
+    const offCtx = offCanvas.getContext('2d');
+
+    const srcCanvas = document.getElementById('srcCanvas');
+    const overlayCanvas = document.getElementById('overlayCanvas');
+    const outCanvas = document.getElementById('outCanvas');
+    const srcCtx = srcCanvas.getContext('2d');
+    const overlayCtx = overlayCanvas.getContext('2d');
+    const outCtx = outCanvas.getContext('2d');
+
+    ['spacingX','spacingY','offsetX','offsetY','sampleR'].forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('input', () => {
+        document.getElementById(id + 'Val').textContent = parseFloat(el.value);
+        drawOverlay();
+      });
+    });
+    ['drawSize','gap'].forEach(id => {
+      const el = document.getElementById(id);
+      el.addEventListener('input', () => { document.getElementById(id + 'Val').textContent = parseFloat(el.value); });
+    });
+    document.getElementById('showOverlay').addEventListener('change', drawOverlay);
+
+    function loadImage(file) {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          srcImg = img;
+          offCanvas.width = img.width;
+          offCanvas.height = img.height;
+          offCtx.drawImage(img, 0, 0);
+
+          const maxW = Math.min(900, img.width);
+          displayScale = maxW / img.width;
+          srcCanvas.width = Math.round(img.width * displayScale);
+          srcCanvas.height = Math.round(img.height * displayScale);
+          overlayCanvas.width = srcCanvas.width;
+          overlayCanvas.height = srcCanvas.height;
+          srcCtx.drawImage(img, 0, 0, srcCanvas.width, srcCanvas.height);
+
+          document.getElementById('mainUI').style.display = 'block';
+          document.getElementById('dropzone').style.display = 'none';
+          drawOverlay();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    const dropzone = document.getElementById('dropzone');
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+    dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.classList.remove('drag'); if (e.dataTransfer.files[0]) loadImage(e.dataTransfer.files[0]); });
+    document.getElementById('fileInput').addEventListener('change', e => { if (e.target.files[0]) loadImage(e.target.files[0]); });
+
+    function getParams() {
+      return {
+        spacingX: parseFloat(document.getElementById('spacingX').value),
+        spacingY: parseFloat(document.getElementById('spacingY').value),
+        offsetX:  parseFloat(document.getElementById('offsetX').value),
+        offsetY:  parseFloat(document.getElementById('offsetY').value),
+        sampleR:  parseInt(document.getElementById('sampleR').value),
+        drawSize: parseFloat(document.getElementById('drawSize').value),
+        gap:      parseInt(document.getElementById('gap').value),
+      };
+    }
+
+    function getCenters(W, H, p) {
+      const centers = [];
+      for (let y = p.offsetY; y < H; y += p.spacingY)
+        for (let x = p.offsetX; x < W; x += p.spacingX)
+          centers.push({ x: Math.round(x), y: Math.round(y) });
+      return centers;
+    }
+
+    function drawOverlay() {
+      if (!srcImg) return;
+      overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+      if (!document.getElementById('showOverlay').checked) return;
+      const p = getParams();
+      const centers = getCenters(srcImg.width, srcImg.height, p);
+      overlayCtx.strokeStyle = 'rgba(74, 143, 212, 0.7)';
+      overlayCtx.lineWidth = 1;
+      const s = p.sampleR * displayScale;
+      for (const { x, y } of centers) {
+        const dx = x * displayScale, dy = y * displayScale;
+        overlayCtx.strokeRect(dx - s, dy - s, s * 2, s * 2);
+      }
+    }
+
+    function sampleBrightness(cx, cy, r, imgData, W, H) {
+      let total = 0, count = 0;
+      const ir = Math.ceil(r);
+      for (let dy = -ir; dy <= ir; dy++) {
+        for (let dx = -ir; dx <= ir; dx++) {
+          const px = cx + dx, py = cy + dy;
+          if (px < 0 || py < 0 || px >= W || py >= H) continue;
+          const idx = (py * W + px) * 4;
+          total += imgData[idx] * 0.299 + imgData[idx+1] * 0.587 + imgData[idx+2] * 0.114;
+          count++;
+        }
+      }
+      return count > 0 ? total / count : 0;
+    }
+
+    function applyTone(b, mode) {
+      let v = b / 255;
+      if (mode === 'invert') v = 1 - v;
+      else if (mode === 'dark') v = Math.pow(v, 1.8);
+      else if (mode === 'light') v = Math.pow(v, 0.5);
+      return Math.round(v * 255);
+    }
+
+    document.getElementById('renderBtn').addEventListener('click', () => {
+      if (!srcImg) return;
+      const p = getParams();
+      const mode = document.getElementById('modeSelect').value;
+      const bg = document.getElementById('bgColor').value;
+      const W = srcImg.width, H = srcImg.height;
+      const imgData = offCtx.getImageData(0, 0, W, H).data;
+      const centers = getCenters(W, H, p);
+
+      // output canvas: fit all pixels
+      const cols = Math.ceil((W - p.offsetX) / p.spacingX);
+      const rows = Math.ceil((H - p.offsetY) / p.spacingY);
+      const cellSize = p.drawSize + p.gap;
+      outCanvas.width  = Math.round(cols * cellSize);
+      outCanvas.height = Math.round(rows * cellSize);
+
+      outCtx.fillStyle = bg;
+      outCtx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+
+      let col = 0, row = 0;
+      let prevY = centers[0]?.y ?? 0;
+
+      for (const { x, y } of centers) {
+        if (y !== prevY && Math.abs(y - prevY) > p.spacingY * 0.5) {
+          row++;
+          col = 0;
+          prevY = y;
+        }
+        const raw = sampleBrightness(x, y, p.sampleR, imgData, W, H);
+        const v = applyTone(raw, mode);
+        outCtx.fillStyle = `rgb(${v},${v},${v})`;
+        const px = col * cellSize + p.gap / 2;
+        const py = row * cellSize + p.gap / 2;
+        outCtx.fillRect(px, py, p.drawSize, p.drawSize);
+        col++;
+      }
+
+      document.getElementById('outputCol').style.display = 'block';
+    });
+
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.download = 'pixel-matrix.png';
+      link.href = outCanvas.toDataURL('image/png');
+      link.click();
+    });
+  </script>
+</body>
+</html>
