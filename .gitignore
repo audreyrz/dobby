@@ -2,3 +2,6 @@ imgStitch/frames/
 imgStitch/output/
 .DS_Store
 colmap_ws/
+glomap_ws/
+building_scan/
+glomap_src
