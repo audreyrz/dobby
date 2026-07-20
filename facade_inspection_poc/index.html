@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Facade Inspection POC</title>
+<style>
+  :root{
+    --bg: #0d1117;
+    --panel-bg: #161b22;
+    --panel-bg-2: #1c2330;
+    --border: #2a313d;
+    --text: #e6edf3;
+    --text-dim: #8b96a5;
+    --accent: #4da3ff;
+    --red: #ff5c5c;
+    --green: #3ddc84;
+    --amber: #ffb84d;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  #app { display: flex; width: 100vw; height: 100vh; }
+
+  #viewport { position: relative; flex: 1 1 auto; min-width: 0; height: 100%; background: #0a0e14; }
+  #viewport canvas { display: block; }
+
+  #loading-overlay {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px;
+    background: #0a0e14; color: var(--text-dim); font-size: 13px;
+  }
+  #loading-overlay .spinner {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 3px solid #2a313d; border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #hud {
+    position: absolute; top: 14px; left: 16px; z-index: 5;
+    font-size: 12px; color: var(--text-dim);
+    background: rgba(13,17,23,0.6); backdrop-filter: blur(6px);
+    padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);
+    line-height: 1.5;
+  }
+  #hud b { color: var(--text); }
+
+  #topbar {
+    position: absolute; top: 14px; right: 16px; z-index: 5;
+    display: flex; gap: 8px;
+  }
+  .pill-btn {
+    background: var(--panel-bg-2); color: var(--text); border: 1px solid var(--border);
+    padding: 9px 14px; border-radius: 8px; font-size: 13px; cursor: pointer;
+    font-weight: 600; letter-spacing: 0.2px;
+  }
+  .pill-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .pill-btn:active { transform: translateY(1px); }
+  .pill-btn.primary { background: var(--accent); color: #05131f; border-color: var(--accent); }
+  .pill-btn.primary:hover { color: #05131f; opacity: 0.9; }
+
+  #tooltip {
+    position: absolute; z-index: 6; pointer-events: none;
+    background: rgba(13,17,23,0.92); border: 1px solid var(--border);
+    padding: 5px 9px; border-radius: 6px; font-size: 11px; color: var(--text);
+    display: none; white-space: nowrap;
+  }
+
+  #sidebar {
+    flex: 0 0 380px; width: 380px; height: 100%;
+    background: var(--panel-bg); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .sb-header {
+    padding: 16px 18px 12px; border-bottom: 1px solid var(--border);
+  }
+  .sb-header h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: 0.2px; }
+  .sb-header p { margin: 0; font-size: 12px; color: var(--text-dim); }
+
+  .stats-row { display: flex; gap: 8px; padding: 12px 18px; border-bottom: 1px solid var(--border); }
+  .stat-card {
+    flex: 1; background: var(--panel-bg-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px;
+  }
+  .stat-card .n { font-size: 18px; font-weight: 700; }
+  .stat-card .l { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .stat-card.red .n { color: var(--red); }
+  .stat-card.green .n { color: var(--green); }
+
+  #sb-scroll { flex: 1 1 auto; overflow-y: auto; }
+  #sb-scroll::-webkit-scrollbar { width: 8px; }
+  #sb-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  #detail-section { padding: 16px 18px; border-bottom: 1px solid var(--border); }
+  #detail-empty { color: var(--text-dim); font-size: 13px; padding: 30px 0; text-align: center; }
+  #detail-empty svg { display:block; margin: 0 auto 10px; opacity: 0.35; }
+
+  .detail-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+  .detail-title { font-size: 14px; font-weight: 700; }
+  .detail-sub { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+    padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.3px;
+  }
+  .badge.crack { background: rgba(255,92,92,0.15); color: var(--red); border: 1px solid rgba(255,92,92,0.4); }
+  .badge.clean { background: rgba(61,220,132,0.15); color: var(--green); border: 1px solid rgba(61,220,132,0.4); }
+  .badge.pending { background: rgba(139,150,165,0.15); color: var(--text-dim); border: 1px solid var(--border); }
+  .badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .img-wrap {
+    position: relative; width: 100%; border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--border); margin: 12px 0; background: #000;
+    display: flex; align-items: center; justify-content: center; min-height: 120px;
+  }
+  .img-wrap img { display: block; max-width: 100%; height: auto; width: 100%; }
+
+  .caveat { font-size: 10px; color: var(--text-dim); margin: -6px 0 10px; line-height: 1.4; }
+
+  .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .metric { background: var(--panel-bg-2); border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; }
+  .metric .v { font-size: 14px; font-weight: 700; }
+  .metric .k { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 2px; }
+
+  .confidence-bar { height: 6px; border-radius: 3px; background: var(--panel-bg-2); overflow: hidden; margin-top: 6px; }
+  .confidence-bar > div { height: 100%; border-radius: 3px; }
+
+  #log-header {
+    padding: 12px 18px 8px; font-size: 11px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.6px; display: flex; justify-content: space-between; align-items: center;
+  }
+  #log-list { padding: 0 10px 16px; }
+  .log-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 8px; border-radius: 7px; cursor: pointer; font-size: 12px;
+  }
+  .log-item:hover { background: var(--panel-bg-2); }
+  .log-item.active { background: rgba(77,163,255,0.12); border: 1px solid rgba(77,163,255,0.3); }
+  .log-thumb { width: 32px; height: 32px; border-radius: 5px; overflow: hidden; flex: 0 0 auto; border: 1px solid var(--border); background: #000; }
+  .log-thumb img { width: 100%; height: 100%; display: block; object-fit: cover; }
+  .log-item .li-id { font-weight: 600; }
+  .log-item .li-sub { color: var(--text-dim); font-size: 10px; }
+  .li-status { margin-left: auto; width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+  .li-status.crack { background: var(--red); box-shadow: 0 0 6px rgba(255,92,92,0.7); }
+  .li-status.clean { background: var(--green); }
+
+  .empty-log { color: var(--text-dim); font-size: 12px; padding: 8px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="viewport">
+    <div id="loading-overlay"><div class="spinner"></div>Building the scene&hellip;</div>
+    <div id="hud"><b>Facade Inspection Prototype</b><br/>Drag to orbit &middot; Scroll to zoom &middot; Click any facade panel to inspect</div>
+    <div id="topbar">
+      <button class="pill-btn" id="btn-reset-view">Reset View</button>
+      <button class="pill-btn primary" id="btn-scan-all">Auto-Sample Panels</button>
+    </div>
+    <div id="tooltip"></div>
+  </div>
+
+  <div id="sidebar">
+    <div class="sb-header">
+      <h1>Building Facade Inspection</h1>
+      <p>Procedurally rendered building &middot; simulated drone capture &middot; automated crack detection</p>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="n" id="stat-total">0</div>
+        <div class="l">Inspectable Panels</div>
+      </div>
+      <div class="stat-card">
+        <div class="n" id="stat-inspected">0</div>
+        <div class="l">Inspected</div>
+      </div>
+      <div class="stat-card red">
+        <div class="n" id="stat-cracks">0</div>
+        <div class="l">Cracks Found</div>
+      </div>
+    </div>
+
+    <div id="sb-scroll">
+      <div id="detail-section">
+        <div id="detail-empty">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" />
+          </svg>
+          Click anywhere on the building facade to simulate a drone capture of that spot and run crack detection on it.
+        </div>
+      </div>
+
+      <div id="log-header">
+        <span>Inspection Log</span>
+        <span id="log-count">0 entries</span>
+      </div>
+      <div id="log-list"><div class="empty-log">No panels inspected yet.</div></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+/* ============================== HELPERS ============================== */
+function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+function mulberry32(seed){
+  let t = seed >>> 0;
+  return function(){
+    t += 0x6D2B79F5;
+    let r = Math.imul(t ^ t>>>15, 1 | t);
+    r ^= r + Math.imul(r ^ r>>>7, 61 | r);
+    return ((r ^ r>>>14) >>> 0) / 4294967296;
+  };
+}
+function hashStr(s){
+  let h = 2166136261;
+  for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+/* ============================== BUILDING DIMENSIONS ============================== */
+const CELL_W = 2.3, FLOOR_H = 3.15, FRONT_COLS = 7, SIDE_COLS = 4, FLOORS = 9;
+const TOWER_W = FRONT_COLS*CELL_W, TOWER_D = SIDE_COLS*CELL_W, TOWER_H = FLOORS*FLOOR_H;
+const PODIUM_H = 7.4, PODIUM_W = TOWER_W+2.0, PODIUM_D = TOWER_D+2.0;
+const SIDEWALK_W = 3.2, STREET_W = 9, STRIP_LEN = 90;
+
+/* ============================== STATE ============================== */
+let scene, camera, renderer, controls, raycaster, mouse;
+let selectionRing = null;
+let selectedInspection = null;
+const towerWalls = [];
+let modelDiag = 20;
+let overviewCamPos = null, overviewTarget = null;
+let streetZ = null;
+let animReq = null;
+
+const inspections = [];
+const inspectionsById = {};
+let nextInspectionNum = 1;
+let inspectedCount = 0;
+let crackCount = 0;
+
+const viewportEl = document.getElementById('viewport');
+const tooltipEl = document.getElementById('tooltip');
+const loadingEl = document.getElementById('loading-overlay');
+
+const EMPTY_DETAIL_HTML = `<div id="detail-empty">
+  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6" />
+  </svg>
+  Click anywhere on the building facade to simulate a drone capture of that spot and run crack detection on it.
+</div>`;
+
+/* ============================== INIT ============================== */
+function init(){
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(55, viewportEl.clientWidth/viewportEl.clientHeight, 0.1, 500);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(viewportEl.clientWidth, viewportEl.clientHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  viewportEl.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+
+  setupLights();
+
+  raycaster = new THREE.Raycaster();
+  mouse = new THREE.Vector2();
+
+  const ringGeo = new THREE.RingGeometry(1, 1.15, 32);
+  selectionRing = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd54a, side: THREE.DoubleSide, depthTest: false, transparent: true }));
+  selectionRing.renderOrder = 998;
+  selectionRing.visible = false;
+  scene.add(selectionRing);
+
+  window.addEventListener('resize', onResize);
+  renderer.domElement.addEventListener('pointerdown', onPointerDown);
+  renderer.domElement.addEventListener('pointerup', onPointerUp);
+  renderer.domElement.addEventListener('pointermove', onPointerMove);
+
+  document.getElementById('btn-scan-all').addEventListener('click', autoSamplePoints);
+  document.getElementById('btn-reset-view').addEventListener('click', resetView);
+
+  buildScene();
+
+  document.getElementById('stat-total').textContent =
+    towerWalls.reduce((s,w)=>s + w.userData.cols*w.userData.floors, 0);
+
+  loadingEl.style.display = 'none';
+}
+
+function setupLights(){
+  const hemi = new THREE.HemisphereLight(0xcfe3ff, 0x4d5a45, 0.9);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xfff3e0, 1.15);
+  sun.position.set(30, 45, 20);
+  sun.castShadow = true;
+  sun.shadow.camera.left = -55; sun.shadow.camera.right = 55;
+  sun.shadow.camera.top = 55; sun.shadow.camera.bottom = -55;
+  sun.shadow.camera.near = 1; sun.shadow.camera.far = 160;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.bias = -0.0004;
+  scene.add(sun);
+  const fill = new THREE.DirectionalLight(0xaac8ff, 0.3);
+  fill.position.set(-20, 15, -15);
+  scene.add(fill);
+}
+
+/* ============================== SCENE ASSEMBLY ============================== */
+function buildScene(){
+  buildSky();
+  buildGroundAndStreet();
+  buildNeighborBuildings();
+  buildHeroBuilding();
+  buildStreetProps();
+  buildDistantSkyline();
+  frameCameraOnHero();
+}
+
+function buildSky(){
+  const c = document.createElement('canvas');
+  c.width = 2; c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0,0,0,256);
+  g.addColorStop(0, '#5b8fd6');
+  g.addColorStop(0.45, '#9fc3e8');
+  g.addColorStop(0.75, '#d7e8f2');
+  g.addColorStop(1, '#eef5f8');
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,2,256);
+  scene.background = new THREE.CanvasTexture(c);
+  scene.fog = new THREE.Fog(0xbcd6ec, 60, 220);
+}
+
+/* ---------- textures ---------- */
+function makeConcreteTexture(){
+  const c = document.createElement('canvas'); c.width=128; c.height=128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#a9a9a2'; ctx.fillRect(0,0,128,128);
+  ctx.strokeStyle = 'rgba(120,120,114,0.6)'; ctx.lineWidth = 2;
+  ctx.strokeRect(1,1,126,126);
+  for(let i=0;i<400;i++){
+    const x=Math.random()*128, y=Math.random()*128;
+    ctx.fillStyle = `rgba(90,90,84,${Math.random()*0.06})`;
+    ctx.fillRect(x,y,2,2);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+function makeAsphaltTexture(){
+  const c = document.createElement('canvas'); c.width=256; c.height=128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#333335'; ctx.fillRect(0,0,256,128);
+  for(let i=0;i<1200;i++){
+    const x=Math.random()*256, y=Math.random()*128;
+    const v = 40+Math.random()*25;
+    ctx.fillStyle = `rgba(${v},${v},${v+2},0.5)`;
+    ctx.fillRect(x,y,1.5,1.5);
+  }
+  ctx.fillStyle = '#d8d4c0';
+  ctx.fillRect(20,60,60,6);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+function buildStorefrontTile(){
+  const canvas = document.createElement('canvas');
+  canvas.width = 220; canvas.height = 520;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#8a8580'; ctx.fillRect(0,0,220,520);
+  ctx.fillStyle = '#7d7972'; ctx.fillRect(0,0,220,180);
+  for(let y=0;y<180;y+=20){
+    ctx.strokeStyle = 'rgba(90,88,84,0.5)';
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(220,y); ctx.stroke();
+  }
+  const g = ctx.createLinearGradient(0,190,0,480);
+  g.addColorStop(0,'rgb(60,68,74)'); g.addColorStop(1,'rgb(35,40,45)');
+  ctx.fillStyle = g; ctx.fillRect(14,190,192,290);
+  ctx.strokeStyle = '#3a3a38'; ctx.lineWidth = 8; ctx.strokeRect(14,190,192,290);
+  ctx.fillStyle = '#8a2e2e';
+  ctx.fillRect(0,150,220,26);
+  for(let x=0;x<220;x+=22){
+    ctx.fillStyle = (x/22)%2===0 ? '#8a2e2e' : '#c8c8c4';
+    ctx.fillRect(x,150,22,26);
+  }
+  ctx.fillStyle = '#2a2c2e'; ctx.fillRect(90,300,60,180);
+  return { canvas, tileWorldWidth: 3, tileWorldHeight: 7.4 };
+}
+
+function makeNeighborWindowTexture(hue){
+  const c = document.createElement('canvas'); c.width=128; c.height=192;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = hue; ctx.fillRect(0,0,128,192);
+  ctx.fillStyle = 'rgba(40,44,50,0.85)';
+  for(let y=14;y<192;y+=38){
+    for(let x=10;x<128;x+=34){
+      ctx.fillRect(x,y,22,26);
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+function drawWindowCell(ctx, cx, cy, cw, ch, rnd){
+  const padX = cw*0.18, padTop = ch*0.22, padBot = ch*0.32;
+  const wx = cx+padX, wy = cy+padTop, ww = cw-padX*2, wh = ch-padTop-padBot;
+
+  ctx.fillStyle = 'rgba(70,68,64,0.35)';
+  ctx.fillRect(wx-4, wy+wh, ww+8, 6);
+
+  ctx.fillStyle = 'rgba(70,68,64,0.25)';
+  ctx.fillRect(wx-2, wy-5, ww+4, 5);
+
+  ctx.fillStyle = 'rgb(96,96,92)';
+  ctx.fillRect(wx-5, wy-5, ww+10, wh+10);
+
+  const lit = rnd() < 0.16;
+  const g = ctx.createLinearGradient(wx,wy,wx,wy+wh);
+  if(lit){
+    g.addColorStop(0,'rgb(158,138,96)');
+    g.addColorStop(1,'rgb(120,102,74)');
+  } else {
+    const tone = 85+rnd()*45;
+    g.addColorStop(0, `rgb(${tone+30},${tone+38},${tone+46})`);
+    g.addColorStop(0.55, `rgb(${tone},${tone+8},${tone+16})`);
+    g.addColorStop(1, `rgb(${tone-15},${tone-8},${tone})`);
+  }
+  ctx.fillStyle = g;
+  ctx.fillRect(wx,wy,ww,wh);
+
+  ctx.fillStyle = 'rgb(100,100,96)';
+  ctx.fillRect(wx+ww/2-1.5, wy, 3, wh);
+  ctx.fillRect(wx, wy+wh/2-1.5, ww, 3);
+
+  if(!lit){
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = ww*0.14;
+    ctx.beginPath();
+    ctx.moveTo(wx+ww*0.1, wy+wh);
+    ctx.lineTo(wx+ww*0.55, wy);
+    ctx.stroke();
+  }
+
+  if(rnd() < 0.22){
+    ctx.fillStyle = 'rgb(118,118,114)';
+    ctx.fillRect(wx+ww*0.15, wy+wh+8, ww*0.7, ch*0.09);
+  }
+}
+
+function drawCrackInCell(ctx, cx, cy, cw, ch, severity, rnd){
+  // Clipped to this cell's own bounds (with a small inset) so a crack can never
+  // bleed into a neighboring cell's crop margin and get misattributed to it.
+  const inset = 3;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(cx+inset, cy+inset, cw-inset*2, ch-inset*2);
+  ctx.clip();
+
+  const len = ch*(0.55+0.55*severity);
+  let x = cx + cw*0.5 + (rnd()-0.5)*cw*0.25;
+  let y = cy + ch*0.5 - len/2;
+  const baseAngle = Math.PI/2 + (rnd()-0.5)*0.7;
+  const steps = 16;
+  const stepLen = len/steps;
+  ctx.strokeStyle = 'rgba(28,22,18,0.92)';
+  ctx.lineWidth = 1.4 + severity*1.8;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x,y);
+  let ang = baseAngle;
+  for(let i=0;i<steps;i++){
+    ang += (rnd()-0.5)*0.5;
+    x += Math.cos(ang)*stepLen;
+    y += Math.sin(ang)*stepLen;
+    ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  if(severity > 0.65){
+    let bx = cx+cw*0.5, by = cy+ch*0.55;
+    ctx.beginPath();
+    ctx.moveTo(bx,by);
+    let bang = baseAngle + 0.9*(rnd()<0.5?1:-1);
+    for(let i=0;i<7;i++){
+      bang += (rnd()-0.5)*0.4;
+      bx += Math.cos(bang)*stepLen*0.8;
+      by += Math.sin(bang)*stepLen*0.8;
+      ctx.lineTo(bx,by);
+    }
+    ctx.lineWidth = 1+severity;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function buildFacadeTexture(facadeId, cols, floors){
+  const cellW = 150, cellH = 180;
+  const W = cols*cellW, H = floors*cellH;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const rnd = mulberry32(hashStr(facadeId));
+
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, 'rgb(182,180,174)');
+  grad.addColorStop(1, 'rgb(150,148,142)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+
+  ctx.strokeStyle = 'rgba(90,90,86,0.55)';
+  ctx.lineWidth = 2;
+  for(let f=1; f<floors; f++){
+    const y = H - f*cellH;
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  }
+  for(let c=1;c<cols;c++){
+    const x = c*cellW;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+  }
+
+  for(let i=0;i<W*H*0.02;i++){
+    const x=rnd()*W, y=rnd()*H;
+    const v = 130+rnd()*50;
+    ctx.fillStyle = `rgba(${v},${v},${v-4},0.05)`;
+    ctx.fillRect(x,y,2,2);
+  }
+
+  for(let c=0;c<cols;c++){
+    if(rnd() < 0.4){
+      const x = c*cellW + cellW*(0.2+rnd()*0.6);
+      const g = ctx.createLinearGradient(0,0,0,H);
+      g.addColorStop(0,'rgba(60,58,54,0)');
+      g.addColorStop(1,`rgba(60,58,54,${0.06+rnd()*0.08})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x-4,0,8,H);
+    }
+  }
+
+  const crackMap = {};
+  const crackRnd = mulberry32(hashStr(facadeId+'::cracks'));
+
+  for(let row=0; row<floors; row++){
+    const floorIdx = floors-1-row;
+    for(let col=0; col<cols; col++){
+      const cx = col*cellW, cy = row*cellH;
+      drawWindowCell(ctx, cx, cy, cellW, cellH, rnd);
+      if(crackRnd() < 0.12){
+        const severity = 0.4+crackRnd()*0.6;
+        drawCrackInCell(ctx, cx, cy, cellW, cellH, severity, crackRnd);
+        crackMap[floorIdx+'_'+col] = { severity };
+      }
+    }
+  }
+
+  return { canvas, cellW, cellH, cols, floors, crackMap };
+}
+
+/* ---------- ground / street ---------- */
+function buildSidewalkStrip(centerZ, width){
+  const tex = makeConcreteTexture();
+  tex.repeat.set(STRIP_LEN/1.5, width/1.5);
+  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
+  const geo = new THREE.PlaneGeometry(STRIP_LEN, width);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI/2;
+  mesh.position.set(0, 0.01, centerZ);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+function buildCurb(z){
+  const mat = new THREE.MeshStandardMaterial({ color: 0xb9b9b3, roughness: 0.9 });
+  const geo = new THREE.BoxGeometry(STRIP_LEN, 0.15, 0.22);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(0, 0.075, z);
+  mesh.receiveShadow = true; mesh.castShadow = true;
+  scene.add(mesh);
+}
+
+function buildStreet(centerZ, width){
+  const tex = makeAsphaltTexture();
+  tex.repeat.set(STRIP_LEN/6, 1);
+  const mat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.95 });
+  const geo = new THREE.PlaneGeometry(STRIP_LEN, width);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI/2;
+  mesh.position.set(0, 0.005, centerZ);
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+function buildGroundAndStreet(){
+  const groundMat = new THREE.MeshStandardMaterial({ color: 0x596a4c, roughness: 1 });
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(240,240), groundMat);
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -0.02;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  const z0 = PODIUM_D/2;
+  const nearSidewalkCenterZ = z0 + SIDEWALK_W/2;
+  buildSidewalkStrip(nearSidewalkCenterZ, SIDEWALK_W);
+  const curbNearZ = z0 + SIDEWALK_W;
+  buildCurb(curbNearZ);
+  const streetCenterZ = curbNearZ + STREET_W/2;
+  buildStreet(streetCenterZ, STREET_W);
+  const curbFarZ = curbNearZ + STREET_W;
+  buildCurb(curbFarZ);
+  const farSidewalkCenterZ = curbFarZ + SIDEWALK_W/2;
+  buildSidewalkStrip(farSidewalkCenterZ, SIDEWALK_W);
+
+  streetZ = { z0, curbNearZ, streetCenterZ, curbFarZ, farEdgeZ: curbFarZ + SIDEWALK_W };
+}
+
+/* ---------- neighbor buildings ---------- */
+function buildSimpleBuilding(w,h,d,x,z,hue,rotY){
+  const tex = makeNeighborWindowTexture(hue);
+  const texClone = tex.clone(); texClone.needsUpdate = true;
+  tex.repeat.set(w/2.2, h/3.0);
+  texClone.repeat.set(d/2.2, h/3.0);
+  const matZ = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.85 });
+  const matX = new THREE.MeshStandardMaterial({ map: texClone, roughness: 0.85 });
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x3d3d3d });
+  const geo = new THREE.BoxGeometry(w,h,d);
+  const mesh = new THREE.Mesh(geo, [matX,matX,capMat,capMat,matZ,matZ]);
+  mesh.position.set(x,h/2,z);
+  mesh.rotation.y = rotY || 0;
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  scene.add(mesh);
+  return mesh;
+}
+
+function buildNeighborBuildings(){
+  buildSimpleBuilding(9,26,10, -(TOWER_W/2+2+4.5), 0, '#b7a98d');
+  buildSimpleBuilding(8,34,10, (TOWER_W/2+2+4), 0, '#8ea0ad');
+
+  const farZ = streetZ.farEdgeZ + 5;
+  buildSimpleBuilding(11,30,9, -9, farZ, '#a9a49a', Math.PI);
+  buildSimpleBuilding(9,22,9, 4, farZ, '#93877a', Math.PI);
+  buildSimpleBuilding(10,38,9, 16, farZ, '#7f8f9c', Math.PI);
+}
+
+/* ---------- hero building ---------- */
+function buildPodium(w,d,h){
+  const tile = buildStorefrontTile();
+  const texZ = new THREE.CanvasTexture(tile.canvas);
+  texZ.wrapS = texZ.wrapT = THREE.RepeatWrapping;
+  texZ.repeat.set(w/tile.tileWorldWidth, h/tile.tileWorldHeight);
+  const texX = texZ.clone(); texX.needsUpdate = true;
+  texX.repeat.set(d/tile.tileWorldWidth, h/tile.tileWorldHeight);
+
+  const matZ = new THREE.MeshStandardMaterial({ map: texZ, roughness: 0.7 });
+  const matX = new THREE.MeshStandardMaterial({ map: texX, roughness: 0.7 });
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9 });
+  const geo = new THREE.BoxGeometry(w,h,d);
+  const mesh = new THREE.Mesh(geo, [matX,matX,capMat,capMat,matZ,matZ]);
+  mesh.position.set(0,h/2,0);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+function buildRoofDetails(y, w, d){
+  const grp = new THREE.Group();
+  const tankMat = new THREE.MeshStandardMaterial({ color: 0x8a6a4a, roughness: 0.8 });
+  const legMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.1,2.0,16), tankMat);
+  const roofCone = new THREE.Mesh(new THREE.ConeGeometry(1.25,0.9,16), tankMat);
+  const tankX = -w*0.28, tankZ = d*0.22;
+  tank.position.set(tankX, y+1.9, tankZ);
+  roofCone.position.set(tankX, y+1.9+1.0+0.45, tankZ);
+  tank.castShadow = true; roofCone.castShadow = true;
+  grp.add(tank, roofCone);
+  for(let i=0;i<4;i++){
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,1.8,6), legMat);
+    const ang = i*Math.PI/2 + Math.PI/4;
+    leg.position.set(tankX+Math.cos(ang)*0.85, y+0.9, tankZ+Math.sin(ang)*0.85);
+    grp.add(leg);
+  }
+
+  const acMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.6, metalness: 0.3 });
+  for(let i=0;i<3;i++){
+    const ac = new THREE.Mesh(new THREE.BoxGeometry(1.0,0.6,0.8), acMat);
+    ac.position.set(w*0.15+i*1.3-1.0, y+0.3, -d*0.2);
+    ac.castShadow = true; ac.receiveShadow = true;
+    grp.add(ac);
+  }
+
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b });
+  const railH = 1.0;
+  const postGeo = new THREE.CylinderGeometry(0.03,0.03,railH,6);
+  const positions = [];
+  for(let x=-w/2; x<=w/2+0.01; x+=1.5){ positions.push([x,-d/2]); positions.push([x,d/2]); }
+  for(let z=-d/2; z<=d/2+0.01; z+=1.5){ positions.push([-w/2,z]); positions.push([w/2,z]); }
+  positions.forEach(([x,z])=>{
+    const post = new THREE.Mesh(postGeo, railMat);
+    post.position.set(x, y+railH/2, z);
+    grp.add(post);
+  });
+  const bar = (len,rx,rz,axis)=>{
+    const geo = axis==='x' ? new THREE.BoxGeometry(len,0.04,0.04) : new THREE.BoxGeometry(0.04,0.04,len);
+    const m = new THREE.Mesh(geo, railMat);
+    m.position.set(rx, y+railH, rz);
+    grp.add(m);
+  };
+  bar(w,0,-d/2,'x'); bar(w,0,d/2,'x'); bar(d,-w/2,0,'z'); bar(d,w/2,0,'z');
+
+  scene.add(grp);
+}
+
+function buildFireEscape(baseY, floors, floorH, towerW, towerD){
+  const grp = new THREE.Group();
+  const steelMat = new THREE.MeshStandardMaterial({ color: 0x2f3336, roughness: 0.6, metalness: 0.5 });
+  const x = towerW/2 + 0.05;
+  const z = -towerD*0.15;
+  const platW = 1.5, platD = 1.0;
+  let prevY = null;
+  for(let f=1; f<floors; f++){
+    const y = baseY + f*floorH;
+    const plat = new THREE.Mesh(new THREE.BoxGeometry(platD, 0.08, platW), steelMat);
+    plat.position.set(x+platD/2, y, z);
+    grp.add(plat);
+    [-platW/2, platW/2].forEach((oz)=>{
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.025,0.9,6), steelMat);
+      post.position.set(x+platD-0.05, y+0.45, z+oz);
+      grp.add(post);
+    });
+    if(prevY !== null){
+      const dy = floorH;
+      const stairLen = Math.sqrt(dy*dy + 0.3*0.3);
+      const stair = new THREE.Mesh(new THREE.BoxGeometry(platD*0.7, 0.06, stairLen), steelMat);
+      stair.position.set(x+platD*0.35, y-dy/2, z);
+      stair.rotation.x = Math.atan2(dy, 0.3);
+      grp.add(stair);
+    }
+    prevY = y;
+  }
+  scene.add(grp);
+}
+
+function buildHeroBuilding(){
+  buildPodium(PODIUM_W, PODIUM_D, PODIUM_H);
+
+  const baseY = PODIUM_H;
+  const facades = [
+    { id:'front', label:'North Facade', cols:FRONT_COLS, width:TOWER_W, rotY:0, pos:new THREE.Vector3(0, baseY+TOWER_H/2, TOWER_D/2) },
+    { id:'back',  label:'South Facade', cols:FRONT_COLS, width:TOWER_W, rotY:Math.PI, pos:new THREE.Vector3(0, baseY+TOWER_H/2, -TOWER_D/2) },
+    { id:'right', label:'East Facade',  cols:SIDE_COLS,  width:TOWER_D, rotY:Math.PI/2, pos:new THREE.Vector3(TOWER_W/2, baseY+TOWER_H/2, 0) },
+    { id:'left',  label:'West Facade',  cols:SIDE_COLS,  width:TOWER_D, rotY:-Math.PI/2, pos:new THREE.Vector3(-TOWER_W/2, baseY+TOWER_H/2, 0) },
+  ];
+
+  facades.forEach(f=>{
+    const tex = buildFacadeTexture(f.id, f.cols, FLOORS);
+    const ctex = new THREE.CanvasTexture(tex.canvas);
+    const mat = new THREE.MeshStandardMaterial({ map: ctex, roughness: 0.88, metalness: 0.04, side: THREE.DoubleSide });
+    const geo = new THREE.PlaneGeometry(f.width, TOWER_H);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.y = f.rotY;
+    mesh.position.copy(f.pos);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.userData = { label: f.label, canvas: tex.canvas, cellW: tex.cellW, cellH: tex.cellH, cols: f.cols, floors: FLOORS, crackMap: tex.crackMap };
+    scene.add(mesh);
+    towerWalls.push(mesh);
+  });
+
+  const roofGeo = new THREE.BoxGeometry(TOWER_W, 0.6, TOWER_D);
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x4a4c50, roughness: 0.9 });
+  const roof = new THREE.Mesh(roofGeo, roofMat);
+  roof.position.set(0, baseY+TOWER_H+0.3, 0);
+  roof.castShadow = true; roof.receiveShadow = true;
+  scene.add(roof);
+
+  buildRoofDetails(baseY+TOWER_H+0.6, TOWER_W, TOWER_D);
+  buildFireEscape(baseY, FLOORS, FLOOR_H, TOWER_W, TOWER_D);
+}
+
+/* ---------- street props ---------- */
+function buildLamp(x,z){
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x1e1e1e, metalness: 0.6, roughness: 0.4 });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.08,4.2,8), poleMat);
+  pole.position.set(x,2.1,z); pole.castShadow = true;
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(0.7,0.06,0.06), poleMat);
+  arm.position.set(x+0.35,4.05,z);
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xffe9b0, emissive: 0xffcf6b, emissiveIntensity: 0.6 });
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.14,10,10), headMat);
+  head.position.set(x+0.68,3.98,z);
+  scene.add(pole, arm, head);
+}
+
+function buildTree(x,z){
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5b4632, roughness: 0.9 });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.18,1.6,8), trunkMat);
+  trunk.position.set(x,0.8,z); trunk.castShadow = true;
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x3f6b3a, roughness: 0.95 });
+  const s = 0.9+Math.random()*0.4;
+  for(let i=0;i<3;i++){
+    const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(0.85*s,0), leafMat);
+    leaf.position.set(x+(Math.random()-0.5)*0.4, 2.0+i*0.35, z+(Math.random()-0.5)*0.4);
+    leaf.castShadow = true;
+    scene.add(leaf);
+  }
+  scene.add(trunk);
+}
+
+function buildCar(x,z,color){
+  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.4, metalness: 0.5 });
+  const glassMat = new THREE.MeshStandardMaterial({ color: 0x2a2f33, roughness: 0.2, metalness: 0.6 });
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 });
+  const grp = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4.0,0.55,1.8), bodyMat);
+  body.position.set(x,0.5,z); body.castShadow = true; body.receiveShadow = true;
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(2.0,0.42,1.5), glassMat);
+  cabin.position.set(x,0.95,z); cabin.castShadow = true;
+  grp.add(body, cabin);
+  const wheelGeo = new THREE.CylinderGeometry(0.32,0.32,0.28,12);
+  [[-1.3,0.85],[-1.3,-0.85],[1.3,0.85],[1.3,-0.85]].forEach(([ox,oz])=>{
+    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+    wheel.rotation.z = Math.PI/2;
+    wheel.position.set(x+ox,0.32,z+oz);
+    grp.add(wheel);
+  });
+  scene.add(grp);
+}
+
+function buildHydrant(x,z){
+  const mat = new THREE.MeshStandardMaterial({ color: 0xb33a2f, roughness: 0.6 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.14,0.5,10), mat);
+  body.position.set(x,0.25,z); body.castShadow = true;
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.13,10,10), mat);
+  cap.position.set(x,0.52,z);
+  scene.add(body, cap);
+}
+
+function buildStreetProps(){
+  for(let x=-16; x<=16; x+=8){
+    if(Math.abs(x) < TOWER_W/2+1.5) continue;
+    buildLamp(x, streetZ.curbNearZ - 0.3);
+  }
+  for(let x=-18; x<=18; x+=5.5){
+    if(Math.abs(x) < TOWER_W/2+2.5) continue;
+    if(Math.random() < 0.7) buildTree(x, streetZ.z0 + SIDEWALK_W*0.7);
+  }
+  const carColors = [0x9c3b3b, 0x35507a, 0x555555, 0x8a8a3a];
+  let ci = 0;
+  for(let x=-17; x<=17; x+=4.6){
+    if(Math.abs(x) < TOWER_W/2+1.5) continue;
+    buildCar(x, streetZ.curbNearZ + 1.0, carColors[ci%carColors.length]);
+    ci++;
+  }
+  buildHydrant(TOWER_W/2+3, streetZ.curbNearZ - 0.4);
+}
+
+function buildDistantSkyline(){
+  const c = document.createElement('canvas'); c.width=1024; c.height=256;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0,0,1024,256);
+  ctx.fillStyle = 'rgba(150,170,190,0.55)';
+  let x = 0;
+  while(x < 1024){
+    const w = 30+Math.random()*50;
+    const h = 60+Math.random()*160;
+    ctx.fillRect(x,256-h,w,h);
+    x += w+Math.random()*14;
+  }
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false });
+  const geo = new THREE.PlaneGeometry(220,55);
+  const p1 = new THREE.Mesh(geo, mat);
+  p1.position.set(0,27,-90);
+  const p2 = new THREE.Mesh(geo, mat.clone());
+  p2.position.set(0,27,90);
+  p2.rotation.y = Math.PI;
+  scene.add(p1, p2);
+}
+
+/* ---------- camera framing ---------- */
+function frameCameraOnHero(){
+  const totalH = PODIUM_H+TOWER_H;
+  const center = new THREE.Vector3(0, totalH*0.42, 0);
+  const camX = Math.max(TOWER_W, TOWER_D)*1.9 + 6;
+  const camY = totalH*1.05;
+  const camZ = Math.min(streetZ.curbNearZ + STREET_W*0.35, 16);
+  overviewCamPos = new THREE.Vector3(camX, camY, camZ);
+  overviewTarget = center.clone();
+  camera.position.copy(overviewCamPos);
+  controls.target.copy(overviewTarget);
+  controls.minDistance = 4;
+  controls.maxDistance = overviewCamPos.distanceTo(overviewTarget)*3.2;
+  controls.maxPolarAngle = Math.PI*0.49;
+  controls.update();
+  modelDiag = Math.max(TOWER_W, TOWER_D, totalH);
+  selectionRing.scale.setScalar(modelDiag*0.05);
+}
+
+/* ============================== CRACK DETECTION ============================== */
+// Flood-fills dark pixels (8-connected) and flags thin, elongated, low-fill-ratio
+// components as crack candidates. Runs on the clean (undecorated) synthetic photo.
+function analyzeCrop(canvas){
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.getImageData(0,0,w,h);
+  const data = imgData.data;
+  const DARK_THRESH = 58;
+
+  const gray = new Uint8ClampedArray(w*h);
+  for(let i=0;i<w*h;i++){
+    const r=data[i*4], g=data[i*4+1], b=data[i*4+2];
+    gray[i] = 0.299*r + 0.587*g + 0.114*b;
+  }
+
+  const visited = new Uint8Array(w*h);
+  const stackX = new Int32Array(w*h), stackY = new Int32Array(w*h);
+  const components = [];
+
+  for(let y=0;y<h;y++){
+    for(let x=0;x<w;x++){
+      const idx = y*w+x;
+      if(visited[idx] || gray[idx] >= DARK_THRESH) continue;
+      let sp = 0;
+      stackX[sp]=x; stackY[sp]=y; sp++;
+      visited[idx] = 1;
+      let minX=x,maxX=x,minY=y,maxY=y,count=0;
+      while(sp > 0){
+        sp--;
+        const cx = stackX[sp], cy = stackY[sp];
+        count++;
+        if(cx<minX)minX=cx; if(cx>maxX)maxX=cx;
+        if(cy<minY)minY=cy; if(cy>maxY)maxY=cy;
+        const nbrs = [[cx-1,cy],[cx+1,cy],[cx,cy-1],[cx,cy+1],[cx-1,cy-1],[cx+1,cy+1],[cx-1,cy+1],[cx+1,cy-1]];
+        for(const [nx,ny] of nbrs){
+          if(nx<0||ny<0||nx>=w||ny>=h) continue;
+          const nidx = ny*w+nx;
+          if(visited[nidx] || gray[nidx] >= DARK_THRESH) continue;
+          visited[nidx] = 1;
+          stackX[sp]=nx; stackY[sp]=ny; sp++;
+        }
+      }
+      components.push({minX,maxX,minY,maxY,count});
+    }
+  }
+
+  const diag = Math.sqrt(w*w+h*h);
+  const candidates = components.map(c=>{
+    const bw = c.maxX-c.minX+1, bh = c.maxY-c.minY+1;
+    const length = Math.sqrt(bw*bw+bh*bh);
+    const fillRatio = c.count/(bw*bh);
+    return { ...c, bw, bh, length, fillRatio };
+  }).filter(c => c.length >= diag*0.16 && c.count >= 15 && c.fillRatio <= 0.5);
+
+  if(candidates.length){
+    candidates.sort((a,b)=>b.length-a.length);
+    const primary = candidates[0];
+    const confidence = Math.min(0.97, 0.55 + (primary.length/diag)*0.35 + (1-primary.fillRatio)*0.1);
+    return { hasCrack: true, confidence, boxes: candidates.slice(0,3).map(c=>({x:c.minX,y:c.minY,w:c.bw,h:c.bh})) };
+  }
+  return { hasCrack: false, confidence: 0.88+Math.random()*0.09, boxes: [] };
+}
+
+/* ============================== SYNTHETIC DRONE PHOTO ============================== */
+function composePhoto(sourceCanvas, cellRect, meta){
+  // The displayed photo shows generous surrounding context (adjacent brick/windows),
+  // but detection runs ONLY on the exact clicked cell so a crack in a neighboring
+  // panel can never be misattributed to this one.
+  const canvasW = sourceCanvas.width, canvasH = sourceCanvas.height;
+  const marginX = cellRect.w*0.55, marginY = cellRect.h*0.5;
+  const wx = clamp(cellRect.x-marginX, 0, canvasW);
+  const wy = clamp(cellRect.y-marginY, 0, canvasH);
+  const wide = {
+    x: wx, y: wy,
+    w: Math.min(cellRect.w+marginX*2, canvasW-wx),
+    h: Math.min(cellRect.h+marginY*2, canvasH-wy)
+  };
+
+  const DISPLAY_W = 520;
+  const DISPLAY_H = Math.round(DISPLAY_W * wide.h / wide.w);
+  const scale = DISPLAY_W / wide.w;
+
+  const cropCanvas = document.createElement('canvas');
+  cropCanvas.width = wide.w; cropCanvas.height = wide.h;
+  cropCanvas.getContext('2d').drawImage(sourceCanvas, wide.x, wide.y, wide.w, wide.h, 0,0, wide.w, wide.h);
+  const clean = document.createElement('canvas');
+  clean.width = DISPLAY_W; clean.height = DISPLAY_H;
+  clean.getContext('2d').drawImage(cropCanvas, 0,0, DISPLAY_W, DISPLAY_H);
+
+  const tightCanvas = document.createElement('canvas');
+  tightCanvas.width = Math.round(cellRect.w*scale);
+  tightCanvas.height = Math.round(cellRect.h*scale);
+  tightCanvas.getContext('2d').drawImage(sourceCanvas, cellRect.x, cellRect.y, cellRect.w, cellRect.h, 0,0, tightCanvas.width, tightCanvas.height);
+
+  const result = analyzeCrop(tightCanvas);
+  const offX = (cellRect.x-wide.x)*scale, offY = (cellRect.y-wide.y)*scale;
+  result.boxes = result.boxes.map(b=>({ x: b.x+offX, y: b.y+offY, w: b.w, h: b.h }));
+
+  const disp = document.createElement('canvas');
+  disp.width = DISPLAY_W; disp.height = DISPLAY_H;
+  const dctx = disp.getContext('2d');
+  dctx.drawImage(clean,0,0);
+
+  const gd = dctx.getImageData(0,0,DISPLAY_W,DISPLAY_H);
+  for(let i=0;i<gd.data.length;i+=4){
+    const n = (Math.random()-0.5)*14;
+    gd.data[i]+=n; gd.data[i+1]+=n; gd.data[i+2]+=n;
+  }
+  dctx.putImageData(gd,0,0);
+
+  const vg = dctx.createRadialGradient(DISPLAY_W/2,DISPLAY_H/2,DISPLAY_W*0.3,DISPLAY_W/2,DISPLAY_H/2,DISPLAY_W*0.75);
+  vg.addColorStop(0,'rgba(0,0,0,0)');
+  vg.addColorStop(1,'rgba(0,0,0,0.28)');
+  dctx.fillStyle = vg;
+  dctx.fillRect(0,0,DISPLAY_W,DISPLAY_H);
+
+  if(result.hasCrack){
+    dctx.strokeStyle = '#ff5c5c'; dctx.lineWidth = 3;
+    result.boxes.forEach((b,i)=>{
+      const pad = 6;
+      dctx.strokeRect(b.x-pad, b.y-pad, b.w+pad*2, b.h+pad*2);
+      if(i===0){
+        dctx.fillStyle = '#ff5c5c'; dctx.font = 'bold 13px monospace';
+        dctx.fillText('CRACK', b.x-pad, Math.max(14, b.y-pad-4));
+      }
+    });
+  } else {
+    dctx.strokeStyle = 'rgba(61,220,132,0.85)'; dctx.lineWidth = 4;
+    dctx.strokeRect(2,2,DISPLAY_W-4,DISPLAY_H-4);
+  }
+
+  dctx.fillStyle = 'rgba(0,0,0,0.45)';
+  dctx.fillRect(0,DISPLAY_H-22,DISPLAY_W,22);
+  dctx.fillStyle = 'rgba(255,255,255,0.85)';
+  dctx.font = '10px monospace';
+  dctx.fillText(meta, 8, DISPLAY_H-8);
+
+  return { canvas: disp, result };
+}
+
+/* ============================== INTERACTION ============================== */
+let downInfo = null;
+
+function onPointerDown(e){ downInfo = { x: e.clientX, y: e.clientY, t: performance.now() }; }
+function onPointerUp(e){
+  if(!downInfo) return;
+  const dx = e.clientX-downInfo.x, dy = e.clientY-downInfo.y;
+  const dt = performance.now()-downInfo.t;
+  downInfo = null;
+  if(Math.sqrt(dx*dx+dy*dy) < 6 && dt < 400) pickPoint(e.clientX, e.clientY);
+}
+
+function onPointerMove(e){
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
+  mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(towerWalls);
+  if(hits.length){
+    renderer.domElement.style.cursor = 'pointer';
+    tooltipEl.style.display = 'block';
+    tooltipEl.style.left = (e.clientX-rect.left+14) + 'px';
+    tooltipEl.style.top = (e.clientY-rect.top+10) + 'px';
+    tooltipEl.textContent = 'Click to inspect this panel';
+  } else {
+    renderer.domElement.style.cursor = 'grab';
+    tooltipEl.style.display = 'none';
+  }
+}
+
+function pickPoint(clientX, clientY){
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((clientX-rect.left)/rect.width)*2-1;
+  mouse.y = -((clientY-rect.top)/rect.height)*2+1;
+  raycaster.setFromCamera(mouse, camera);
+  const hits = raycaster.intersectObjects(towerWalls);
+  if(hits.length) createInspection(hits[0]);
+}
+
+function autoSamplePoints(){
+  let tries = 0, found = 0;
+  while(found < 5 && tries < 500){
+    tries++;
+    const nx = Math.random()*1.0-0.5, ny = Math.random()*1.0-0.5;
+    raycaster.setFromCamera({ x: nx, y: ny }, camera);
+    const hits = raycaster.intersectObjects(towerWalls);
+    if(hits.length){ createInspection(hits[0]); found++; }
+  }
+}
+
+function createInspection(hit){
+  const wall = hit.object.userData;
+  const point = hit.point.clone();
+  const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+  const uv = hit.uv;
+
+  const canvasW = wall.cellW*wall.cols, canvasH = wall.cellH*wall.floors;
+  const px = uv.x*canvasW;
+  const py = (1-uv.y)*canvasH;
+  const col = clamp(Math.floor(px/wall.cellW), 0, wall.cols-1);
+  const rowFromTop = clamp(Math.floor(py/wall.cellH), 0, wall.floors-1);
+  const floor = wall.floors-1-rowFromTop;
+
+  const cellRect = { x: col*wall.cellW, y: rowFromTop*wall.cellH, w: wall.cellW, h: wall.cellH };
+
+  const id = `INS-${String(nextInspectionNum).padStart(2,'0')}`;
+  const meta = `DRONE-0${(nextInspectionNum%4)+1} · ALT ${(28+floor*2.6).toFixed(1)}m · ${wall.label} F${floor+1}/B${col+1}`;
+  nextInspectionNum++;
+
+  const photo = composePhoto(wall.canvas, cellRect, meta);
+  const photoDataURL = photo.canvas.toDataURL('image/jpeg', 0.86);
+
+  const insp = { id, point, normal, floor, col, wallLabel: wall.label, result: photo.result, photoDataURL, marker: null };
+  inspections.push(insp);
+  inspectionsById[id] = insp;
+
+  highlightSelection(point, normal);
+  flyToPoint(point, normal);
+  selectedInspection = insp;
+
+  inspectedCount++;
+  document.getElementById('stat-inspected').textContent = inspectedCount;
+  if(insp.result.hasCrack){
+    crackCount++;
+    document.getElementById('stat-cracks').textContent = crackCount;
+    addMarker(insp);
+  }
+
+  renderDetail(insp);
+  renderLog();
+}
+
+function highlightSelection(point, normal){
+  selectionRing.visible = true;
+  selectionRing.position.copy(point).addScaledVector(normal, modelDiag*0.002);
+  selectionRing.lookAt(point.clone().add(normal));
+}
+
+function addMarker(insp){
+  const c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.beginPath(); ctx.arc(32,32,26,0,Math.PI*2);
+  ctx.fillStyle = 'rgba(255,92,92,0.95)';
+  ctx.fill();
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.stroke();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 34px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('!', 32, 34);
+
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.setScalar(modelDiag*0.06);
+  sprite.position.copy(insp.point).addScaledVector(insp.normal, modelDiag*0.03);
+  sprite.renderOrder = 999;
+  scene.add(sprite);
+  insp.marker = sprite;
+}
+
+/* ============================== CAMERA FLY-TO ============================== */
+function flyToPoint(point, normal){
+  const camDest = point.clone().addScaledVector(normal, modelDiag*0.28).add(new THREE.Vector3(0, modelDiag*0.06, 0));
+  const startCam = camera.position.clone();
+  const startTarget = controls.target.clone();
+  const t0 = performance.now();
+  const dur = 650;
+  if(animReq) cancelAnimationFrame(animReq);
+  function step(){
+    const t = Math.min(1, (performance.now()-t0)/dur);
+    const e = t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2;
+    camera.position.lerpVectors(startCam, camDest, e);
+    controls.target.lerpVectors(startTarget, point, e);
+    controls.update();
+    if(t<1) animReq = requestAnimationFrame(step);
+  }
+  step();
+}
+
+function resetView(){
+  selectionRing.visible = false;
+  selectedInspection = null;
+  if(!overviewCamPos) return;
+  const startCam = camera.position.clone();
+  const startTarget = controls.target.clone();
+  const t0 = performance.now();
+  const dur = 700;
+  if(animReq) cancelAnimationFrame(animReq);
+  function step(){
+    const t = Math.min(1, (performance.now()-t0)/dur);
+    const e = t<0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2;
+    camera.position.lerpVectors(startCam, overviewCamPos, e);
+    controls.target.lerpVectors(startTarget, overviewTarget, e);
+    controls.update();
+    if(t<1) animReq = requestAnimationFrame(step);
+  }
+  step();
+  renderDetail(null);
+  renderLog();
+}
+
+/* ============================== SIDEBAR RENDERING ============================== */
+function renderDetail(insp){
+  const section = document.getElementById('detail-section');
+  if(!insp){
+    section.innerHTML = EMPTY_DETAIL_HTML;
+    return;
+  }
+
+  const r = insp.result;
+  const badgeClass = r.hasCrack ? 'crack' : 'clean';
+  const badgeText = r.hasCrack ? 'CRACK DETECTED' : 'NO DEFECTS FOUND';
+  const barColor = r.hasCrack ? 'var(--red)' : 'var(--green)';
+
+  section.innerHTML = `
+    <div class="detail-title-row">
+      <div>
+        <div class="detail-title">${insp.id}</div>
+        <div class="detail-sub">${insp.wallLabel} &middot; Floor ${insp.floor+1} &middot; Bay ${insp.col+1}</div>
+      </div>
+      <span class="badge ${badgeClass}"><span class="dot"></span>${badgeText}</span>
+    </div>
+    <div class="img-wrap"><img src="${insp.photoDataURL}" alt="Simulated drone capture"/></div>
+    <div class="metric-grid">
+      <div class="metric">
+        <div class="k">Confidence</div>
+        <div class="v">${Math.round(r.confidence*100)}%</div>
+        <div class="confidence-bar"><div style="width:${Math.round(r.confidence*100)}%; background:${barColor};"></div></div>
+      </div>
+      <div class="metric">
+        <div class="k">Panel</div>
+        <div class="v" style="font-size:12px;">${insp.wallLabel}, F${insp.floor+1}/B${insp.col+1}</div>
+      </div>
+    </div>
+    <div class="caveat">Simulated drone capture of a procedurally generated facade, analyzed with a heuristic edge/blob crack detector &mdash; a demonstration pipeline, not a calibrated structural inspection.</div>
+  `;
+}
+
+function renderLog(){
+  const list = document.getElementById('log-list');
+  document.getElementById('log-count').textContent = `${inspections.length} entries`;
+
+  if(inspections.length === 0){
+    list.innerHTML = '<div class="empty-log">No panels inspected yet.</div>';
+    return;
+  }
+
+  const sorted = inspections.slice().sort((a,b)=>{
+    const ca = a.result.hasCrack ? 1 : 0, cb = b.result.hasCrack ? 1 : 0;
+    if(ca !== cb) return cb-ca;
+    return a.id.localeCompare(b.id);
+  });
+
+  list.innerHTML = '';
+  sorted.forEach(insp=>{
+    const r = insp.result;
+    const item = document.createElement('div');
+    item.className = 'log-item' + (selectedInspection===insp ? ' active' : '');
+    const statusClass = r.hasCrack ? 'crack' : 'clean';
+
+    const thumbWrap = document.createElement('div');
+    thumbWrap.className = 'log-thumb';
+    const thumbImg = document.createElement('img');
+    thumbImg.src = insp.photoDataURL;
+    thumbWrap.appendChild(thumbImg);
+
+    const info = document.createElement('div');
+    info.innerHTML = `<div class="li-id">${insp.id}</div><div class="li-sub">${insp.wallLabel} F${insp.floor+1}/B${insp.col+1} &middot; ${Math.round(r.confidence*100)}%</div>`;
+
+    const status = document.createElement('div');
+    status.className = 'li-status ' + statusClass;
+
+    item.appendChild(thumbWrap);
+    item.appendChild(info);
+    item.appendChild(status);
+    item.addEventListener('click', ()=>{
+      selectedInspection = insp;
+      highlightSelection(insp.point, insp.normal);
+      flyToPoint(insp.point, insp.normal);
+      renderDetail(insp);
+      renderLog();
+    });
+    list.appendChild(item);
+  });
+}
+
+/* ============================== RESIZE / LOOP ============================== */
+function onResize(){
+  camera.aspect = viewportEl.clientWidth / viewportEl.clientHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(viewportEl.clientWidth, viewportEl.clientHeight);
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+
+/* ============================== BOOTSTRAP ============================== */
+init();
+animate();
+</script>
+</body>
+</html>
