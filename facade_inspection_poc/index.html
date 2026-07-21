@@ -282,7 +282,7 @@ function init(){
   mouse = new THREE.Vector2();
 
   const ringGeo = new THREE.RingGeometry(1, 1.15, 32);
-  selectionRing = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd54a, side: THREE.DoubleSide, depthTest: false, transparent: true }));
+  selectionRing = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd54a, side: THREE.DoubleSide, transparent: true, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
   selectionRing.renderOrder = 998;
   selectionRing.visible = false;
   scene.add(selectionRing);
@@ -1162,10 +1162,13 @@ function addMarker(insp){
   ctx.fillText('!', 32, 34);
 
   const tex = new THREE.CanvasTexture(c);
-  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
+  const mat = new THREE.SpriteMaterial({ map: tex });
   const sprite = new THREE.Sprite(mat);
   sprite.scale.setScalar(modelDiag*0.06);
-  sprite.position.copy(insp.point).addScaledVector(insp.normal, modelDiag*0.03);
+  // Sit just off the surface (not floating in front of it) so the marker doesn't
+  // visibly drift relative to the facade when the camera zooms or orbits, and
+  // gets correctly hidden behind the building when viewed from the other side.
+  sprite.position.copy(insp.point).addScaledVector(insp.normal, modelDiag*0.004);
   sprite.renderOrder = 999;
   scene.add(sprite);
   insp.marker = sprite;
